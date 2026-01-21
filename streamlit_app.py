@@ -1,48 +1,75 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.ensemble import IsolationForest
-from scipy.sparse import hstack
 from sklearn.preprocessing import StandardScaler
+from scipy.sparse import hstack
 
 st.set_page_config(page_title="Log Anomaly Detection", layout="wide")
-st.title("HDFS Log Anomaly Detection (On-the-fly ML Training)")
+st.title("HDFS Log Anomaly Detection using Unsupervised ML")
 
+# ---------------------------
+# 1. Generate Synthetic Logs
+# ---------------------------
 @st.cache_data
-def load_data():
-    # Load a small sample (you can replace this with Kaggle API later)
-    df = pd.read_csv("parsed_hdfs_logs.csv", nrows=200000)
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
+def generate_logs(n=20000):
+    normal_msgs = [
+        "Receiving block from DataNode",
+        "Block allocation successful",
+        "Heartbeat received from node",
+        "PacketResponder completed",
+        "Metadata update completed",
+        "Replication process finished"
+    ]
+
+    anomaly_msgs = [
+        "Connection timeout to DataNode",
+        "Block corrupted during transfer",
+        "Disk I/O error detected",
+        "NameNode not responding",
+        "Checksum verification failed",
+        "Unexpected shutdown of DataNode"
+    ]
+
+    logs = []
+    timestamps = pd.date_range("2025-01-01", periods=n, freq="min")
+
+    for i in range(n):
+        if np.random.rand() < 0.05:  # 5% anomalies
+            msg = np.random.choice(anomaly_msgs)
+        else:
+            msg = np.random.choice(normal_msgs)
+
+        logs.append(msg)
+
+    df = pd.DataFrame({
+        "timestamp": timestamps,
+        "message": logs
+    })
+
     return df
 
+# ---------------------------
+# 2. Train Model On-the-Fly
+# ---------------------------
 @st.cache_resource
-def build_model(df):
-    texts = df["message"].astype(str)
+def train_model(df):
+    texts = df["message"]
 
-    vectorizer = TfidfVectorizer(
-        max_features=800,
-        stop_words="english",
-        ngram_range=(1,2),
-        min_df=5
-    )
-    X_tfidf = vectorizer.fit_transform(texts)
+    vectorizer = TfidfVectorizer(max_features=500, ngram_range=(1,2))
+    X_text = vectorizer.fit_transform(texts)
 
-    df["log_length"] = texts.str.len()
-    df["word_count"] = texts.str.split().apply(len)
+    df["length"] = texts.str.len()
+    df["words"] = texts.str.split().apply(len)
 
     scaler = StandardScaler()
-    X_num = scaler.fit_transform(df[["log_length", "word_count"]])
+    X_num = scaler.fit_transform(df[["length", "words"]])
 
-    X = hstack([X_tfidf, X_num])
+    X = hstack([X_text, X_num])
 
-    model = IsolationForest(
-        n_estimators=150,
-        contamination=0.05,
-        n_jobs=-1,
-        random_state=42
-    )
-
+    model = IsolationForest(contamination=0.05, n_estimators=150, random_state=42)
     labels = model.fit_predict(X)
     scores = model.decision_function(X)
 
@@ -51,36 +78,39 @@ def build_model(df):
 
     return df, model
 
-with st.spinner("Loading logs and training model (first run only)..."):
-    data = load_data()
-    data, model = build_model(data)
+with st.spinner("Generating logs and training Isolation Forest (first run only)..."):
+    data = generate_logs()
+    data, model = train_model(data)
 
-# KPIs
+# ---------------------------
+# 3. Dashboard
+# ---------------------------
 col1, col2, col3 = st.columns(3)
 col1.metric("Total Logs", len(data))
-col2.metric("Anomalies Detected", int(data["anomaly"].sum()))
+col2.metric("Detected Anomalies", int(data["anomaly"].sum()))
 col3.metric("Anomaly Rate (%)", round(data["anomaly"].mean() * 100, 2))
 
 st.divider()
 
 # Timeline
-st.subheader("Anomaly Timeline (per minute)")
-timeline = data[data["anomaly"] == 1].set_index("timestamp").resample("1T").size()
+st.subheader("Anomaly Timeline")
+timeline = data[data["anomaly"] == 1].set_index("timestamp").resample("1H").size()
 
 fig1, ax1 = plt.subplots(figsize=(10,4))
 timeline.plot(ax=ax1)
-ax1.set_title("Anomaly Frequency Over Time")
-ax1.set_ylabel("Count")
+ax1.set_ylabel("Anomalies per Hour")
 st.pyplot(fig1)
 
-# Score Distribution
+# Score distribution
 st.subheader("Anomaly Score Distribution")
 fig2, ax2 = plt.subplots(figsize=(6,4))
 ax2.hist(data["score"], bins=50)
-ax2.set_title("Isolation Forest Scores")
+ax2.set_xlabel("Isolation Forest Score")
 st.pyplot(fig2)
 
-# Top Anomalies
-st.subheader("Top 20 Most Anomalous Log Messages")
-top_logs = data.sort_values("score").head(20)
-st.dataframe(top_logs[["timestamp", "component", "message", "score"]])
+# Top anomalies
+st.subheader("Top 20 Anomalous Log Events")
+top = data.sort_values("score").head(20)
+st.dataframe(top[["timestamp", "message", "score"]])
+
+st.caption("Unsupervised Anomaly Detection using TF-IDF + Isolation Forest | Fully Reproducible | Cloud Deployable")

@@ -97,7 +97,6 @@ This repository intentionally demonstrates:
 
 ---
 
-## 📄 Resume Description
+## 📄 Live Demo
+https://log-anomaly.streamlit.app/
 
-**Anomaly Detection in Server Logs using Unsupervised Machine Learning**  
-Built a scalable log anomaly detection system using TF-IDF and Isolation Forest on distributed system logs, with on-the-fly model training and caching in a Streamlit dashboard to visualize anomaly timelines and rare event patterns, following industry-standard MLOps practices for large-scale data and model management.
